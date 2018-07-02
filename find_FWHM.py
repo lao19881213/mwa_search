@@ -1,52 +1,34 @@
+#!/usr/bin/env python
+
 from mwapy.pb import primary_beam as pb
 import argparse
 from scipy.interpolate import UnivariateSpline
 import numpy as np
+import matplotlib.pyplot as pl
 
-import urllib
-import urllib2
-import json
+import mwa_metadb_utils as meta
+#import urllib
+#import urllib2
+#import json
 
+import math
 from astropy.coordinates import EarthLocation, SkyCoord, AltAz
 from astropy import units as u
 from astropy.time import Time
 from decimal import Decimal
 
-def getmeta(service='obs', params=None):
-    """
-    getmeta(service='obs', params=None)
-    
-    Given a JSON web service ('obs', find, or 'con') and a set of parameters as
-    a Python dictionary, return the RA and Dec in degrees from the Python dictionary.
-    """
-    BASEURL = 'http://mwa-metadata01.pawsey.org.au/metadata/'
-    if params:
-        data = urllib.urlencode(params)  # Turn the dictionary into a string with encoded 'name=value' pairs
-    else:
-        data = ''
-    #Validate the service name
-    if service.strip().lower() in ['obs', 'find', 'con']:
-        service = service.strip().lower()
-    else:
-        print "invalid service name: %s" % service
-        return
-    #Get the data
-    try:
-        result = json.load(urllib2.urlopen(BASEURL + service + '?' + data))
-    except urllib2.HTTPError as error:
-        print "HTTP error from server: code=%d, response:\n %s" % (error.code, error.read())
-        return
-    except urllib2.URLError as error:
-        print "URL or network error: %s" % error.reason
-        return
-    #Return the result dictionary
-    return result
+def find_ti_pi(theta_N, i):
+    ti = i % theta_N
+    pi = (i - ti)/theta_N
+    return ti, pi
 
+def ti_pi_to_i(ti, pi, theta_N):
+    return (ti + pi*theta_N)
 
 def get_obs_metadata(obs):
     from mwapy.pb import mwa_db_query as mwa_dbQ
 
-    beam_meta_data = getmeta(service='obs', params={'obs_id':obs})
+    beam_meta_data = meta.getmeta(service='obs', params={'obs_id':obs})
     channels = beam_meta_data[u'rfstreams'][u"0"][u'frequencies']
     freqs = [float(c)*1.28 for c in channels]
     xdelays = beam_meta_data[u'rfstreams'][u"0"][u'xdelays']
@@ -122,11 +104,25 @@ az, za, azdeg, zadeg = getTargetAZZA(ra,dec,time)
 azdeg = round(azdeg / 0.05) * 0.05
 print "Search AZ: " + str(azdeg)
 
+#get file metadata
+with open(args.file_loc, "r") as file_opened:
+    lines = file_opened.readlines()
+    for l in lines[:30]:
+        if l.startswith("#No. of Theta Samples"):
+            theta_N = int(float(l.split(":")[-1][:-1]))
+        if l.startswith("#No. of Phi Samples"):
+            phi_N = int(float(l.split(":")[-1][:-1]))
+
+print theta_N
+print phi_N
+
+
 print "Getting observation metadata"
 metadata = get_obs_metadata(int(obsid))
 
 print "Loading file"
 theta, phi, amp = np.genfromtxt(args.file_loc, usecols=(0,1,8), skip_header=14, unpack=True)
+
 
 print "Sorting"
 az, za = np.meshgrid(np.radians(sorted(set(phi))), np.radians(sorted(set(theta))))
@@ -145,27 +141,65 @@ amp[amp >= fill_max] = fill_max
 """
 max_value = np.max(amp)
 local_max_index = np.where(amp==max_value)
-max_phi = float(phi[local_max_index[0]])
+i_max = local_max_index[0]
+max_phi = float(phi[i_max])
 print "Max phi in plot: " + str(max_phi)
 
+ti_max, pi_max = find_ti_pi(theta_N,i_max)
+print i_max, ti_max, pi_max
+
+theta_res = max(theta)/float(theta_N)
+phi_res = max(phi)/float(theta_N)
+
+#work out how many bins away is 2 degrees
+theta_steps = int(2./theta_res)
+phi_steps = int(2./phi_res)
+
 print "Beam sort"
-beam_line = []
-beam_za = []
-print "Amplitude_line: " + str(amp)
+#FHWMs = []
+for fn in range(1):#TODO 4
+    beam_power = []
+    beam_angle = []
+    #print "Amplitude_line: " + str(amp)
+    
+    #TODO a good chance that this will go over the circle(360)
+    if fn == 0:
+        for i in range(len(theta)):
+        #for ti in range(ti_max-theta_steps,ti_max+theta_steps):
+            #print ti
+            #i = ti_pi_to_i(ti, pi_max, theta_N)
+            #print i
+            if max_phi == float(phi[i]):
+                beam_power.append(amp[i])
+                beam_angle.append(float(theta[i]))
+    elif fn == 1:
+        print phi_max-phi_steps, phi_max+phi_steps
+        for pi in range(phi_max-phi_steps, phi_max+phi_steps):
+            i = ti_pi_to_i(ti_max, pi, theta_N)
+            beam_power.append(amp[i])
+            beam_angle.append(phi[i])
+    elif fn == 2:
+        #forward slash
+        ti_start = theta[ti_max-theta_steps]
+        pi_start = phi[phi_max-phi_steps]
+        for ti in range(ti_max-theta_steps, ti_max + theta_steps):
+            for pi in range(phi_max-phi_steps, phi_max+phi_steps):
+                i = ti_pi_to_i(ti, pi, theta_N)
+                beam_power.append(amp[i])
+                angle = math.sqrt( (ti_start-theta[i])**2 + (phi_start-phi[i])**2)
+                beam_angle.append(angle)
+    
+    #print "Beam line to be plotted: " + str(beam_line)
+    print "Beam angle: "+str(beam_angle)
 
-for i in range(len(amp)):
-    if max_phi == float(phi[i]):
-        beam_line.append(amp[i])
-        beam_za.append(theta[i])
-print "Beam line to be plotted: " + str(beam_line)
+    print "Plot beam"
+    pl.plot(beam_angle, beam_power)
+    pl.savefig("zenith_line_plot"+str(fn)+".png")
+    pl.show()
 
-print "Plot beam"
-import matplotlib.pyplot as pl
-pl.plot(beam_za, beam_line)
-pl.savefig("zenith_line_plot.png")
-pl.show()
-
-spline = UnivariateSpline(beam_za, beam_line-np.max(beam_line)/2., s=0)
-print spline.roots()
-r1, r2 = spline.roots()
-print str(r1-r2)
+    spline = UnivariateSpline(beam_angle, beam_power-np.max(beam_power)/2., s=0)
+    print spline.roots()
+    r1, r2 = spline.roots()
+    print str(abs(r1-r2))
+    #FWHMs.append(abs(r1-r2))
+#print FHWMs

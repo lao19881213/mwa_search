@@ -63,11 +63,11 @@ def add_prepfold_to_commands(commands, pointing, pulsar, obsid, nbins, use_mask=
     return commands
 
 #----------------------------------------------------------------------
-def pulsar_beam_coverage(obsid, pulsar):
+def pulsar_beam_coverage(obsid, pulsar, source_type="pulsar"):
     #returns the beginning and end time as a fraction that a pulsar is in the primary beam for the obsid files
 
     #find the enter and exit times of pulsar normalized with the observing time
-    names_ra_dec = fpio.grab_source_alog(pulsar_list=[pulsar])
+    names_ra_dec = fpio.grab_source_alog(pulsar_list=[pulsar], source_type=source_type)
     beam_source_data, _ = fpio.find_sources_in_obs([obsid], names_ra_dec)
 
     enter_obs_norm = beam_source_data[obsid][0][1]

@@ -18,6 +18,7 @@ from mwa_metadb_utils import obs_max_min
 import config
 from grid import get_grid
 import checks
+import binfinder
 
 import logging
 logger = logging.getLogger(__name__)
@@ -69,14 +70,26 @@ def beamform_and_fold(obsid, DI_dir, cal_obs, args, psrbeg, psrend,
                       vdif_check=False, product_dir='/group/mwaops/vcs',
                       mwa_search_version='master'):
 
-
-
     #obsbeg, obsend, obsdur = file_maxmin.print_minmax(obsid)
-
-    #wrapping for find_pulsar_in_obs.py
+    
+    #wrapping for find_pulsar_in_obs.py    
     names_ra_dec = np.array(fpio.grab_source_alog(max_dm=250))
+    rFRB_ra_dec = np.array(fpio.grab_source_alog(source_type='rFRB')
+    for i in rFRB_ra_dec:
+        names_ra_dec.append(i)        
     obs_data, meta_data = fpio.find_sources_in_obs([obsid], names_ra_dec, dt_input=100)
     channels = meta_data[-1][-1]
+
+    #checking that files are on disk before beamforming 
+    for nrd in names_ra_dec:
+        if nrd[0].startswith("J"):
+            s_type = "Pulsar"
+        elif nrd[0].startswith("FRB")
+            s_type = "rFRB"
+        enter, exit = binfinder.pulsar_beam_coverage(obsid, nrd[0], source_type=s_type)
+        if enter>1. or exit <0.:
+            logger.warn("source {0} not in beam for on-disk files. Not beamforming".format(nrd[0]))
+            names_ra_dec.remove(nrd)
 
     pointing_list = []
     jname_list = []
@@ -87,9 +100,9 @@ def beamform_and_fold(obsid, DI_dir, cal_obs, args, psrbeg, psrend,
             temp = fpio.format_ra_dec(temp, ra_col = 1, dec_col = 2)
             jname, raj, decj = temp[0]
             #get pulsar period
-            cmd = ['psrcat', '-c', 'p0', jname]
-            output = subprocess.Popen(cmd,stdout=subprocess.PIPE).communicate()[0].decode()
-            period = output.split('\n')[4].split()[1] #in s
+            #cmd = ['psrcat', '-c', 'p0', jname]
+            #output = subprocess.Popen(cmd,stdout=subprocess.PIPE).communicate()[0].decode()
+            #period = output.split('\n')[4].split()[1] #in s
 
             if '*' in period:
                 print("WARNING: Period not found in ephermeris for {0}".format(jname))
